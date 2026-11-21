@@ -1,0 +1,220 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String          @id @default(cuid())
+  name         String
+  email        String          @unique
+  passwordHash String
+  role         String          @default("STAFF") // ADMIN, MANAGER, STAFF
+  active       Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  movements    StockMovement[]
+  auditLogs    AuditLog[]
+}
+
+model Category {
+  id                  String    @id @default(cuid())
+  name                String    @unique
+  slug                String    @unique
+  defaultReorderLevel Int       @default(5)
+  defaultGstRate      Int       @default(18)
+  description         String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  products            Product[]
+}
+
+model Brand {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  products  Product[]
+}
+
+model Retailer {
+  id             String            @id @default(cuid())
+  name           String
+  contactPerson  String
+  phone          String
+  altPhone       String?
+  email          String
+  address        String
+  city           String
+  state          String
+  pincode        String
+  gstin          String
+  paymentTerms   String            @default("Net 30")
+  notes          String?
+  rating         Int               @default(5)
+  active         Boolean           @default(true)
+  deletedAt      DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  products       ProductRetailer[]
+  purchaseOrders PurchaseOrder[]
+}
+
+model Product {
+  id                 String              @id @default(cuid())
+  name               String
+  brandId            String
+  brand              Brand               @relation(fields: [brandId], references: [id])
+  model              String
+  sku                String              @unique
+  barcode            String?
+  categoryId         String
+  category           Category            @relation(fields: [categoryId], references: [id])
+  quantity           Int                 @default(0)
+  minReorderLevel    Int                 @default(5)
+  purchasePricePaise Int                 @default(0) // Integer in paise (₹1 = 100 paise)
+  sellingPricePaise  Int                 @default(0) // Integer in paise
+  gstRate            Int                 @default(18) // 0, 5, 12, 18, 28
+  warrantyMonths     Int                 @default(12)
+  rackLocation       String              @default("General")
+  version            Int                 @default(1) // Optimistic locking
+  imagePath          String?
+  invoiceNo          String?
+  purchaseDate       DateTime?
+  notes              String?
+  tags               String?
+  alertArmed         Boolean             @default(true) // Arms on restock; drops trigger 1 alert
+  deletedAt          DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  retailers          ProductRetailer[]
+  stockMovements     StockMovement[]
+  purchaseOrderItems PurchaseOrderItem[]
+  serialNumbers      SerialNumber[]
+  notifications      Notification[]
+
+  @@index([barcode])
+  @@index([categoryId])
+}
+
+model ProductRetailer {
+  id                     String    @id @default(cuid())
+  productId              String
+  product                Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  retailerId             String
+  retailer               Retailer  @relation(fields: [retailerId], references: [id], onDelete: Cascade)
+  lastPurchasePricePaise Int       @default(0)
+  lastPurchaseDate       DateTime  @default(now())
+  retailerSku            String?
+  isPrimary              Boolean   @default(false)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@unique([productId, retailerId])
+  @@index([retailerId])
+}
+
+model StockMovement {
+  id               String   @id @default(cuid())
+  productId        String
+  product          Product  @relation(fields: [productId], references: [id])
+  userId           String?
+  user             User?    @relation(fields: [userId], references: [id])
+  type             String   // PURCHASE, SALE, ADJUSTMENT, RETURN_RMA, DAMAGED, TRANSFER
+  quantityChange   Int      // +ve or -ve
+  previousQuantity Int
+  newQuantity      Int
+  unitPricePaise   Int?
+  referenceType    String?  // PURCHASE_ORDER, INVOICE, MANUAL, QUICK_SALE, RMA
+  referenceId      String?
+  reason           String?
+  createdAt        DateTime @default(now())
+
+  @@index([productId, createdAt])
+}
+
+model PurchaseOrder {
+  id           String              @id @default(cuid())
+  poNumber     String              @unique
+  retailerId   String
+  retailer     Retailer            @relation(fields: [retailerId], references: [id])
+  status       String              @default("DRAFT") // DRAFT, SENT, PARTIALLY_RECEIVED, RECEIVED, CANCELLED
+  totalPaise   Int                 @default(0)
+  notes        String?
+  expectedDate DateTime?
+  orderDate    DateTime            @default(now())
+  deletedAt    DateTime?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  items        PurchaseOrderItem[]
+
+  @@index([retailerId])
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product       @relation(fields: [productId], references: [id])
+  orderedQty      Int
+  receivedQty     Int           @default(0)
+  unitPricePaise  Int           @default(0)
+  gstRate         Int           @default(18)
+
+  @@index([purchaseOrderId])
+  @@index([productId])
+}
+
+model SerialNumber {
+  id              String   @id @default(cuid())
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  serialNumber    String   @unique
+  status          String   @default("IN_STOCK") // IN_STOCK, SOLD, DEFECTIVE, RETURNED
+  purchaseOrderId String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([productId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  type      String   // LOW_STOCK, OUT_OF_STOCK, BACKUP_WARNING, PO_STATUS
+  title     String
+  message   String
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+  @@index([isRead])
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   // Serialized value or string
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  details   String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
